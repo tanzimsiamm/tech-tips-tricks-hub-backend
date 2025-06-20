@@ -1,34 +1,31 @@
-import express from 'express'
-import cors from 'cors'
+import express from 'express';
+import cors from 'cors';
 import router from './routes';
+import globalErrorHandler from './middleware/globalErrorHandler'; 
+import notFound from './middleware/notFound'; 
+import config from './config'; 
 
-const app = express()
+const app = express();
 
-// use json body parser 
-app.use(express.json())
+// Use JSON body parser
+app.use(express.json());
 
-// use cors 
-app.use(cors( {origin: "*"}));
-// app.use(cors({origin: "https://trend-tweaks.vercel.app"}));
+// Use CORS
+app.use(cors({ origin: config.NODE_ENV === 'production' ? config.FRONTEND_URL : '*' }));
 
-// use router
-app.use('/api', router)
+// Use main router for /api endpoint
+app.use('/api', router);
 
-
-
+// Basic route for testing
 app.get('/', (req, res) => {
-  res.send('Hello World!')
-})
+    res.send('Hello World! API is running...');
+});
 
-// global error handler 
+// Global error handler
+app.use(globalErrorHandler);
+
+// Not Found handler
+app.use(notFound);
 
 
-app.all('*', (req, res) => {
-  res.status(404).json({
-    "success" : false,
-    "statuscode" : 404,
-    "message" : "Not found"
-  })
-})
-
-export default app
+export default app;

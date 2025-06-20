@@ -1,134 +1,144 @@
-import AppError from "../../errors/AppError";
-import { TUser, TUserUpdatePayload, TFollowUnfollowPayload, IUserDocument, TUserProfileResponse } from "./user.interface";
-import { User } from "./user.model";
-import httpStatus from "http-status";
+// services/user.service.ts
+import httpStatus from 'http-status';
+import { Types } from 'mongoose';
 
-const getAllUsersFromDB = async (role?: string): Promise<TUserProfileResponse[]> => {
-    let query: Record<string, any> = {};
-    if (role) {
-        query = { role };
-    }
-    // Exclude password and select relevant fields
-    const result = await User.find(query).select('-password -__v').lean();
-    return result as TUserProfileResponse[];
+import AppError from '../../errors/AppError';
+import {
+  TUserUpdatePayload,
+  TFollowUnfollowPayload,
+  IUserDocument,
+  TUserProfileResponse,
+} from './user.interface';
+import { User } from './user.model';
+
+/* ------------------------------------------------
+   Helpers
+------------------------------------------------- */
+const projection = '-password -__v';
+const toProfile = (doc: unknown) => doc as TUserProfileResponse;
+
+/* ------------------------------------------------
+   Read
+------------------------------------------------- */
+ const getAllUsersFromDB = async (
+  role?: string
+): Promise<TUserProfileResponse[]> => {
+  const query = role ? { role } : {};
+  const users = await User.find(query).select(projection).lean();
+  return users.map(toProfile);
 };
 
-const getSingleUserFromDB = async (email: string): Promise<TUserProfileResponse | null> => {
-    const result = await User.findOne({ email })
-        .populate({ path: 'followers', select: 'name email image' }) // Populate with specific fields
-        .populate({ path: 'following', select: 'name email image' })
-        .select('-password -__v') // Exclude password and version key
-        .lean(); // Use lean() for plain JS objects
+ const getSingleUserFromDB = async (
+  email: string
+): Promise<TUserProfileResponse | null> => {
+  const user = await User.findOne({ email })
+    .populate({ path: 'followers', select: 'name email image' })
+    .populate({ path: 'following', select: 'name email image' })
+    .select(projection)
+    .lean();
 
-    return result as TUserProfileResponse | null;
+  return user ? toProfile(user) : null;
 };
 
-const updateUserIntoDB = async (id: string, payload: TUserUpdatePayload): Promise<TUserProfileResponse | null> => {
-    const { password, ...otherUpdateFields } = payload;
+/* ------------------------------------------------
+   Update
+------------------------------------------------- */
+ const updateUserIntoDB = async (
+  id: string,
+  payload: TUserUpdatePayload
+): Promise<TUserProfileResponse | null> => {
+  const { password, ...other } = payload;
 
-    // Find user by ID first
-    const user = await User.findById(id);
-    if (!user) {
-        throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
-    }
+  const user = await User.findById(id).select('+password');
+  if (!user) throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
 
-    // If email is being updated, check for uniqueness
-    if (otherUpdateFields.email && otherUpdateFields.email !== user.email) {
-        const existingUser = await User.findOne({ email: otherUpdateFields.email });
-        if (existingUser) {
-            throw new AppError(httpStatus.CONFLICT, 'Email already in use!');
-        }
-    }
+  /* Ensure e‑mail uniqueness */
+  if (other.email && other.email !== user.email) {
+    const duplicate = await User.exists({ email: other.email });
+    if (duplicate)
+      throw new AppError(httpStatus.CONFLICT, 'Email already in use!');
+  }
 
-    // Handle password update separately through Mongoose pre-save hook
-    if (password) {
-        user.password = password; // Mongoose pre-save hook will hash this
-        await user.save(); // Save to trigger hashing and update password
-        delete otherUpdateFields.password; // Remove password from other fields as it's handled
-    }
+  /* Assign new fields */
+  Object.assign(user, other);
 
-    const result = await User.findByIdAndUpdate(id, otherUpdateFields, { new: true, runValidators: true })
-        .select('-password -__v')
-        .lean(); // Use lean() for plain JS object
+  /* Handle password via pre‑save hook */
+  if (password) user.password = password;
 
-    if (!result) {
-        throw new AppError(httpStatus.BAD_REQUEST, 'Failed to update user');
-    }
-    return result as TUserProfileResponse;
+  await user.save(); // fires validators + hooks
+
+  const { password: _, __v, ...rest } = user.toObject<IUserDocument>();
+  return rest as TUserProfileResponse;
 };
 
+/* ------------------------------------------------
+   Follow / Unfollow (atomic)
+------------------------------------------------- */
+ const followUser = async (
+  { userId, targetedUserId }: TFollowUnfollowPayload
+): Promise<TUserProfileResponse | null> => {
+  if (userId === targetedUserId)
+    throw new AppError(httpStatus.BAD_REQUEST, 'Cannot follow yourself!');
 
-const followUser = async (payload: TFollowUnfollowPayload): Promise<TUserProfileResponse | null> => {
-    const { userId, targetedUserId } = payload;
+  /* Validate both users exist */
+  const [targetExists, actorExists] = await Promise.all([
+    User.exists({ _id: targetedUserId }),
+    User.exists({ _id: userId }),
+  ]);
+  if (!targetExists || !actorExists)
+    throw new AppError(httpStatus.NOT_FOUND, 'User(s) not found!');
 
-    if (userId === targetedUserId) {
-        throw new AppError(httpStatus.BAD_REQUEST, 'Cannot follow yourself!');
-    }
+  /* Add with $addToSet to avoid duplicates */
+  await Promise.all([
+    User.updateOne(
+      { _id: targetedUserId },
+      { $addToSet: { followers: new Types.ObjectId(userId) } }
+    ),
+    User.updateOne(
+      { _id: userId },
+      { $addToSet: { following: new Types.ObjectId(targetedUserId) } }
+    ),
+  ]);
 
-    const [userToFollow, followerUser] = await Promise.all([
-        User.findById(targetedUserId),
-        User.findById(userId)
-    ]);
-
-    if (!userToFollow || !followerUser) {
-        throw new AppError(httpStatus.NOT_FOUND, 'User(s) not found!');
-    }
-
-    if (userToFollow.followers?.includes(followerUser._id)) {
-        throw new AppError(httpStatus.CONFLICT, 'You are already following this user!');
-    }
-
-    // Update the user who will be followed
-    userToFollow.followers?.push(followerUser._id);
-    await userToFollow.save();
-
-    // Update the user who requested to follow
-    followerUser.following?.push(userToFollow._id);
-    await followerUser.save();
-
-    // Return the updated follower user's profile (or the userToFollow, based on what FE needs)
-    const updatedFollowerUser = await User.findById(userId).select('-password -__v').lean();
-    return updatedFollowerUser as TUserProfileResponse;
+  const updated = await User.findById(userId).select(projection).lean();
+  return updated ? toProfile(updated) : null;
 };
 
-const unFollowUser = async (payload: TFollowUnfollowPayload): Promise<TUserProfileResponse | null> => {
-    const { userId, targetedUserId } = payload;
+ const unFollowUser = async (
+  { userId, targetedUserId }: TFollowUnfollowPayload
+): Promise<TUserProfileResponse | null> => {
+  /* Validate both users exist */
+  const [targetExists, actorExists] = await Promise.all([
+    User.exists({ _id: targetedUserId }),
+    User.exists({ _id: userId }),
+  ]);
+  if (!targetExists || !actorExists)
+    throw new AppError(httpStatus.NOT_FOUND, 'User(s) not found!');
 
-    const [userToUnfollow, unfollowerUser] = await Promise.all([
-        User.findById(targetedUserId),
-        User.findById(userId)
-    ]);
+  await Promise.all([
+    User.updateOne(
+      { _id: targetedUserId },
+      { $pull: { followers: new Types.ObjectId(userId) } }
+    ),
+    User.updateOne(
+      { _id: userId },
+      { $pull: { following: new Types.ObjectId(targetedUserId) } }
+    ),
+  ]);
 
-    if (!userToUnfollow || !unfollowerUser) {
-        throw new AppError(httpStatus.NOT_FOUND, 'User(s) not found!');
-    }
-
-    if (!userToUnfollow.followers?.includes(unfollowerUser._id)) {
-        throw new AppError(httpStatus.CONFLICT, 'You are not following this user!');
-    }
-
-    // Update the user who will be unfollowed
-    userToUnfollow.followers = userToUnfollow.followers?.filter(
-        (id) => id.toString() !== unfollowerUser._id.toString()
-    );
-    await userToUnfollow.save();
-
-    // Update the user who requested to unfollow
-    unfollowerUser.following = unfollowerUser.following?.filter(
-        (id) => id.toString() !== userToUnfollow._id.toString()
-    );
-    await unfollowerUser.save();
-
-    const updatedUnfollowerUser = await User.findById(userId).select('-password -__v').lean();
-    return updatedUnfollowerUser as TUserProfileResponse;
+  const updated = await User.findById(userId).select(projection).lean();
+  return updated ? toProfile(updated) : null;
 };
 
-const deleteUserFromDB = async (id: string): Promise<IUserDocument | null> => {
-    const user = await User.findByIdAndDelete(id);
-    if (!user) {
-        throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
-    }
-    return user;
+/* ------------------------------------------------
+   Delete
+------------------------------------------------- */
+ const deleteUserFromDB = async (
+  id: string
+): Promise<IUserDocument | null> => {
+  const user = await User.findByIdAndDelete(id);
+  if (!user) throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
+  return user;
 };
 
 export const userServices = {

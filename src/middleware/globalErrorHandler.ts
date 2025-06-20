@@ -7,6 +7,7 @@ import handleDuplicateError from '../errors/handleDuplicateError';
 import handleValidationError from '../errors/handleValidationError';
 import handleZodError from '../errors/handleZodError';
 import { TErrorMessages } from '../interface/error';
+import mongoose from 'mongoose';
 
 const globalErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
   // Setting default values
@@ -24,17 +25,17 @@ const globalErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
     statusCode = simplifiedError?.statusCode;
     message = simplifiedError?.message;
     errorMessages = simplifiedError?.errorMessages;
-  } else if (err?.name === 'ValidationError') {
+  } else if (err instanceof mongoose.Error.ValidationError) { // Changed err?.name to instanceof
     const simplifiedError = handleValidationError(err);
     statusCode = simplifiedError?.statusCode;
     message = simplifiedError?.message;
     errorMessages = simplifiedError?.errorMessages;
-  } else if (err?.name === 'CastError') {
+  } else if (err instanceof mongoose.Error.CastError) { // Changed err?.name to instanceof
     const simplifiedError = handleCastError(err);
     statusCode = simplifiedError?.statusCode;
     message = simplifiedError?.message;
     errorMessages = simplifiedError?.errorMessages;
-  } else if (err?.code === 11000) {
+  } else if (err?.code === 11000) { // Mongoose duplicate key error
     const simplifiedError = handleDuplicateError(err);
     statusCode = simplifiedError?.statusCode;
     message = simplifiedError?.message;
@@ -58,7 +59,7 @@ const globalErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
     ];
   }
 
-  // Send response without returning
+  // Send response
   res.status(statusCode).json({
     success: false,
     message,
