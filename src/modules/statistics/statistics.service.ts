@@ -1,10 +1,20 @@
-import { Post } from '../posts/post.model';
 import { User } from '../users/user.model';
 import { Payment } from '../payments/payment.model';
 import { IOverallStatsResponse } from './statistics.interface';
+import { Post } from '../posts/post.model';
 
 const getOverallAppStats = async (): Promise<IOverallStatsResponse> => {
-    const [totalUsers, totalAdmins, totalPosts, totalPremiumPosts, upvotesResult, downvotesResult, viewsResult, commentsResult, totalSuccessfulPayments] = await Promise.all([
+    const [
+        totalUsers,
+        totalAdmins,
+        totalPosts,
+        totalPremiumPosts,
+        upvotesResult,
+        downvotesResult,
+        viewsResult,
+        commentsResult,
+        totalSuccessfulPayments,
+    ] = await Promise.all([
         User.countDocuments({}),
         User.countDocuments({ role: 'admin' }),
         Post.countDocuments({}),

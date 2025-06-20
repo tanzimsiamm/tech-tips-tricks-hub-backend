@@ -1,8 +1,12 @@
-import { TUserProfileResponse, TUserBase } from '../users/user.interface';
+import { TUser, TUserBase, TUserProfileResponse } from '../users/user.interface';
 
 export type TLoginPayload = Pick<TUserBase, 'email' | 'password'>;
-// For register, we need name, email, password, image, role (role might be default)
-export type TRegisterPayload = Pick<TUserBase, 'name' | 'email' | 'password' | 'image'> & { role?: TUserBase['role'] };
+// FIX APPLIED HERE: TRegisterPayload's password is now explicitly 'string'
+export type TRegisterPayload = Pick<TUserBase, 'name' | 'email'> & {
+    password: string; // Password is required and guaranteed string after Zod validation
+    image?: string;
+    role?: TUserBase['role'];
+};
 
 export interface IAuthResponse {
     token: string;

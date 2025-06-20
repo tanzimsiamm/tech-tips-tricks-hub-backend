@@ -1,5 +1,5 @@
 import { Schema, model, Types } from "mongoose";
-import { TUser, IUserDocument } from "./user.interface";
+import { TUserBase, IUserDocument } from "./user.interface";
 import bcrypt from 'bcryptjs';
 
 const userSchema = new Schema<IUserDocument>({
@@ -29,7 +29,11 @@ const userSchema = new Schema<IUserDocument>({
         { type: Schema.Types.ObjectId, ref: 'User' }
     ],
     memberShip: {
-        type: Schema.Types.Mixed,
+        type: { // Define sub-schema for TMembership
+            takenDate: { type: Date, required: true }, // Changed to Date
+            exp: { type: Date, required: true },       // Changed to Date
+            package: { type: Schema.Types.Mixed, required: true } // Mixed for object
+        },
         default: null
     },
     image : {
@@ -57,4 +61,4 @@ userSchema.methods.matchPassword = async function (enteredPassword: string): Pro
     return await bcrypt.compare(enteredPassword, this.password);
 };
 
-export const User = model<IUserDocument>('User', userSchema);
+export const User = model <IUserDocument> ('User', userSchema);

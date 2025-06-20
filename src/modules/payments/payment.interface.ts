@@ -5,8 +5,7 @@ export type TPaymentStatus = 'pending' | 'succeeded' | 'failed' | 'cancelled';
 export type TPackageName = TMembership['package']['name'];
 
 export type TPayment = {
-    // === REMOVE _ID FROM HERE ===
-    // _id?: Types.ObjectId; // <--- REMOVE THIS LINE
+    // _id is REMOVED from here. It will be provided by Mongoose's Document.
     user: Types.ObjectId;
     package: TPackageName;
     amount: number;

@@ -2,15 +2,14 @@ import { Document, Types } from 'mongoose';
 import { TUserProfileResponse } from '../users/user.interface';
 
 export type TComment = {
-    _id?: Types.ObjectId; // _id is fine here as it's not a top-level Document
+    _id?: Types.ObjectId;
     user: Types.ObjectId | TUserProfileResponse;
     text: string;
     createdAt?: Date;
 };
 
 export type TPost = {
-    // === REMOVE _ID FROM HERE ===
-    // _id?: Types.ObjectId; // <--- REMOVE THIS LINE
+    // _id is REMOVED from here. It will be provided by Mongoose's Document.
     user: Types.ObjectId | TUserProfileResponse;
     title: string;
     content: string;
@@ -26,7 +25,7 @@ export type TPost = {
     updatedAt?: Date;
 };
 
-export interface IPostDocument extends TPost, Document {} // _id is implicitly inherited from Document
+export interface IPostDocument extends TPost, Document {}
 
 export type TCreatePostPayload = Pick<TPost, 'title' | 'content' | 'category' | 'tags' | 'isPremium' | 'images'>;
 export type TUpdatePostPayload = Partial<TCreatePostPayload>;
@@ -34,10 +33,10 @@ export type TAddCommentPayload = Pick<TComment, 'text'>;
 
 export type TPostQueryParams = {
     category?: TPost['category'];
-    search?: string;
+    searchTerm?: string;
     isPremium?: 'true' | 'false';
-    limit?: any;
-    page?: any;
-    sortBy?: 'createdAt' | 'views' | 'upvotes';
-    sortOrder?: 'asc' | 'desc';
+    limit?: string;
+    page?: string;
+    sort?: string;
+    fields?: string;
 };

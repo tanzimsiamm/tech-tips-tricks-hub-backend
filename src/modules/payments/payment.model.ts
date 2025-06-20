@@ -41,6 +41,6 @@ const paymentSchema = new Schema<IPaymentDocument>({
     expiryDate: {
         type: Date,
     },
-}, { timestamps: true });
+}, { timestamps : true });
 
 export const Payment = model<IPaymentDocument>('Payment', paymentSchema);

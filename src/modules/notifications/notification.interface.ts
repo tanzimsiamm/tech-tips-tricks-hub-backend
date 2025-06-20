@@ -4,10 +4,10 @@ import { TUserProfileResponse } from '../users/user.interface';
 export type TNotificationType = 'new_post' | 'comment' | 'follow' | 'payment_success' | 'admin_message';
 
 export type TNotification = {
-    // === REMOVE _ID FROM HERE ===
-    // _id?: Types.ObjectId; // <--- REMOVE THIS LINE
-    user: Types.ObjectId | TUserProfileResponse;
-    sender?: Types.ObjectId | TUserProfileResponse;
+    // FIX APPLIED HERE: _id is REMOVED from the base TNotification type.
+    // It will be implicitly provided by the Document interface in INotificationDocument.
+    user: Types.ObjectId | TUserProfileResponse; // This is for the model/document/populated response
+    sender?: Types.ObjectId | TUserProfileResponse; // This is for the model/document/populated response
     type: TNotificationType;
     message: string;
     link?: string;
@@ -16,6 +16,15 @@ export type TNotification = {
     updatedAt?: Date;
 };
 
+// INotificationDocument now correctly extends TNotification and Document.
+// _id: Types.ObjectId is implicitly provided by the Document interface.
 export interface INotificationDocument extends TNotification, Document {}
 
-export type TCreateNotificationPayload = Pick<TNotification, 'user' | 'sender' | 'type' | 'message' | 'link'>;
+// Request Payloads (remain unchanged)
+export type TCreateNotificationPayload = {
+    user: Types.ObjectId | string; // Accept both ObjectId and string
+    sender?: Types.ObjectId | string;
+    type: TNotificationType;
+    message: string;
+    link?: string;
+};

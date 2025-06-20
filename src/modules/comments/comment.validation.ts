@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { Types } from 'mongoose';
-// Import addCommentValidationSchema from post.validation as it's defined there
 import { postValidations } from '../posts/post.validation';
 
 const objectIdSchema = z.string().refine((val) => Types.ObjectId.isValid(val), {
@@ -12,7 +11,7 @@ const updateCommentValidationSchema = z.object({
 });
 
 export const commentValidations = {
-    addCommentValidationSchema: postValidations.addCommentValidationSchema, // Re-use from post module
+    addCommentValidationSchema: postValidations.addCommentValidationSchema,
     updateCommentValidationSchema,
-    objectIdSchema // For validating commentId in params
+    objectIdSchema
 };

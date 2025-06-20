@@ -1,59 +1,68 @@
 import { Request, Response, NextFunction } from 'express';
 import httpStatus from 'http-status';
 import jwt, { JwtPayload } from 'jsonwebtoken';
-import AppError from '../errors/AppError'; // Your custom AppError
-import catchAsync from '../utils/catchAsync'; // Your catchAsync utility
-import { User } from '../modules/users/user.model'; // Import the User model
-import { TUser } from '../modules/users/user.interface'; // Import the TUser type from the user module
-import config from '../config'; // Import your config for JWT secret
+import AppError from '../errors/AppError';
+import catchAsync from '../utils/catchAsync';
+import { User } from '../modules/users/user.model';
+import config from '../config';
 
-// Extend Express Request interface to include user property
-export interface AuthenticatedRequest extends Request {
-    user?: TUser; // User data will be attached here
-}
+const auth = (...requiredRoles: string[]) => 
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const token = req.headers.authorization;
 
-const auth = (...requiredRoles: string[]) => catchAsync(async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    let token: string | undefined = req.headers.authorization;
-
+    // Check if token exists and is properly formatted
     if (!token || !token.startsWith('Bearer ')) {
-        throw new AppError(httpStatus.UNAUTHORIZED, 'You are not authorized! No token provided.');
+      throw new AppError(httpStatus.UNAUTHORIZED, 'Authorization token missing or malformed');
     }
 
-    token = token.split(' ')[1]; // Extract token from "Bearer <token>"
+    // Extract and verify token
+    const extractedToken = token.split(' ')[1];
+    
+    if (!config.jwt_access_secret) {
+      throw new Error('JWT access secret is not configured');
+    }
 
-    // Verify token
     let decoded: JwtPayload;
     try {
-        if (!config.jwt_access_secret) { // Use config for JWT secret
-            throw new Error('JWT_ACCESS_SECRET is not defined in config.');
-        }
-        decoded = jwt.verify(token, config.jwt_access_secret) as JwtPayload;
+      decoded = jwt.verify(extractedToken, config.jwt_access_secret) as JwtPayload;
     } catch (error) {
-        throw new AppError(httpStatus.UNAUTHORIZED, 'Invalid token or token expired!');
+      throw new AppError(httpStatus.UNAUTHORIZED, 'Invalid or expired token');
     }
 
-    // Attach user to the request
-    const user = await User.findById(decoded._id).select('+role +isBlocked'); // Fetch user with role and isBlocked status
+    // Validate JWT payload structure
+    if (!decoded._id || typeof decoded._id !== 'string') {
+      throw new AppError(httpStatus.UNAUTHORIZED, 'Invalid token payload');
+    }
+
+    // Fetch user with security-related fields
+    const user = await User.findById(decoded._id)
+      .select('+role +isBlocked +passwordChangedAt');
+    
     if (!user) {
-        throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
+      throw new AppError(httpStatus.NOT_FOUND, 'User account not found');
     }
 
-    // Check if user is blocked
+    // Check account status
     if (user.isBlocked) {
-        throw new AppError(httpStatus.FORBIDDEN, 'Your account is blocked!');
+      throw new AppError(httpStatus.FORBIDDEN, 'This account has been blocked');
     }
 
-    // Check if user has required roles
+    // Verify role permissions
     if (requiredRoles.length && !requiredRoles.includes(user.role)) {
-        throw new AppError(httpStatus.FORBIDDEN, 'You are not authorized to perform this action!');
+      throw new AppError(
+        httpStatus.FORBIDDEN,
+        'Insufficient permissions for this operation'
+      );
     }
 
-    // Attach the user (excluding password) to the request for controllers
-    // Ensure that `req.user._id` is a string matching your `TUser` _id type.
-    req.user = user.toObject({ getters: true });
-    delete req.user.password; // Remove password explicitly
+    // Attach sanitized user to request
+    const userObject = user.toObject({ virtuals: true, getters: true });
+    req.user = {
+      ...userObject,
+      password: undefined // Explicitly remove password
+    };
 
     next();
-});
+  });
 
 export default auth;

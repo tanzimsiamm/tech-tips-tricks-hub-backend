@@ -2,8 +2,9 @@ import { User } from '../users/user.model';
 import { TLoginPayload, TRegisterPayload } from './auth.interface';
 import AppError from '../../errors/AppError';
 import httpStatus from 'http-status';
-import { TUserBase } from '../users/user.interface';
 import generateToken from '../../utils/generateToken';
+import { TUserProfileResponse, TUserBase, IUserDocument } from '../users/user.interface';
+import { mapToUserProfileResponse } from '../users/user.mapper';
 
 const registerUser = async (payload: TRegisterPayload) => {
     const { email, password, name, image, role } = payload;
@@ -16,31 +17,25 @@ const registerUser = async (payload: TRegisterPayload) => {
     const newUser = await User.create({
         name,
         email,
-        password,
-        image: image || 'https://placehold.co/150x150/cccccc/ffffff?text=No+Image', // Default image
+        password, // FIX APPLIED HERE: password is now guaranteed string by TRegisterPayload
+        image: image || 'https://placehold.co/150x150/cccccc/ffffff?text=No+Image',
         role: role || 'user',
         isBlocked: false,
-        // Initialize other fields as per schema if not provided and no default
         followers: [],
         following: [],
         memberShip: null,
-    });
+    } as TUserBase); // Cast to TUserBase for creation
 
-    const userResponse: TUserBase = newUser.toObject({ getters: true });
-    delete userResponse.password; // Ensure password is removed
+    const userResponse: TUserProfileResponse = mapToUserProfileResponse(newUser); // Use mapper
     return { user: userResponse, token: generateToken(newUser._id.toString()) };
 };
 
 const loginUser = async (payload: TLoginPayload) => {
     const { email, password } = payload;
 
-    if (!password) {
-        throw new AppError(httpStatus.UNAUTHORIZED, 'Invalid credentials!');
-    }
+    const user = await User.findOne({ email }).select('+password');
 
-    const user = await User.findOne({ email }).select('+password'); // Explicitly select password for comparison
-
-    if (!user || !(await user.matchPassword(password))) {
+    if (!user || !(await user.matchPassword(password as string))) { // Ensure password is treated as string
         throw new AppError(httpStatus.UNAUTHORIZED, 'Invalid credentials!');
     }
 
@@ -48,8 +43,7 @@ const loginUser = async (payload: TLoginPayload) => {
         throw new AppError(httpStatus.FORBIDDEN, 'Your account is blocked. Please contact support.');
     }
 
-    const userResponse: TUserBase = user.toObject({ getters: true });
-    delete userResponse.password;
+    const userResponse: TUserProfileResponse = mapToUserProfileResponse(user); // Use mapper
     return { user: userResponse, token: generateToken(user._id.toString()) };
 };
 

@@ -7,29 +7,25 @@ import { USER_ROLES } from '../../constants/userRoles';
 
 const router = express.Router();
 
-// Create a new post
 router.post(
     '/',
-    auth(USER_ROLES.USER, USER_ROLES.ADMIN), // Only logged-in users/admins can create posts
+    auth(USER_ROLES.USER, USER_ROLES.ADMIN),
     validateRequest(postValidations.createPostValidationSchema),
     postControllers.createPost
 );
 
-// Get all posts (publicly accessible, premium content handled in service)
 router.get(
     '/',
-    validateRequest(postValidations.getPostsQueryParamsSchema), // Validate query params
+    validateRequest(postValidations.getPostsQueryParamsSchema),
     postControllers.getAllPosts
 );
 
-// Get a single post by ID (protected to handle premium content access)
 router.get(
     '/:id',
-    auth(USER_ROLES.USER, USER_ROLES.ADMIN), // User must be authenticated to check premium access
+    auth(USER_ROLES.USER, USER_ROLES.ADMIN),
     postControllers.getSinglePost
 );
 
-// Update a post by ID (only author or admin)
 router.put(
     '/:id',
     auth(USER_ROLES.USER, USER_ROLES.ADMIN),
@@ -37,28 +33,22 @@ router.put(
     postControllers.updatePost
 );
 
-// Delete a post by ID (only author or admin)
 router.delete(
     '/:id',
     auth(USER_ROLES.USER, USER_ROLES.ADMIN),
     postControllers.deletePost
 );
 
-// Upvote a post
 router.patch(
     '/:id/upvote',
     auth(USER_ROLES.USER, USER_ROLES.ADMIN),
     postControllers.upvotePost
 );
 
-// Downvote a post
 router.patch(
     '/:id/downvote',
     auth(USER_ROLES.USER, USER_ROLES.ADMIN),
     postControllers.downvotePost
 );
-
-// Comment routes are now handled in the comments module (e.g., /api/comments/:postId/add)
-// So, you don't need these lines here.
 
 export default router;

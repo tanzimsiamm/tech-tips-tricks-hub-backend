@@ -5,12 +5,12 @@ const notificationSchema = new Schema<INotificationDocument>({
     user: {
         type: Schema.Types.ObjectId,
         required: true,
-        ref: 'User', // User who receives the notification
+        ref: 'User',
     },
     sender: {
         type: Schema.Types.ObjectId,
         ref: 'User',
-        required: false // Not all notifications have a specific sender (e.g., admin message)
+        required: false
     },
     type: {
         type: String,

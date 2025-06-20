@@ -1,11 +1,12 @@
 import { Payment } from './payment.model';
 import { User } from '../users/user.model';
-import { TInitiatePaymentPayload, TPaymentWebhookPayload, TPaymentStatus, IPaymentDocument } from './payment.interface';
+import { TInitiatePaymentPayload, TPaymentWebhookPayload, TPaymentStatus } from './payment.interface';
 import AppError from '../../errors/AppError';
 import httpStatus from 'http-status';
 import axios from 'axios';
 import config from '../../config';
 import { notificationServices } from '../notifications/notification.service';
+import { IPaymentDocument } from './payment.interface';  // Added missing import
 
 const AAMARPAY_STORE_ID = config.AAMARPAY_STORE_ID;
 const AAMARPAY_SIGNATURE_KEY = config.AAMARPAY_SIGNATURE_KEY;
@@ -30,9 +31,9 @@ const initiateAamarpayPayment = async (userId: string, payload: TInitiatePayment
     const formData = new URLSearchParams();
     formData.append('store_id', AAMARPAY_STORE_ID);
     formData.append('tran_id', transactionId);
-    formData.append('success_url', `<span class="math-inline">\{config\.FRONTEND\_URL\}/payment/success?paymentId\=</span>{pendingPayment._id}`);
-    formData.append('fail_url', `<span class="math-inline">\{config\.FRONTEND\_URL\}/payment/fail?paymentId\=</span>{pendingPayment._id}`);
-    formData.append('cancel_url', `<span class="math-inline">\{config\.FRONTEND\_URL\}/payment/cancel?paymentId\=</span>{pendingPayment._id}`);
+    formData.append('success_url', `${config.FRONTEND_URL}/payment/success?paymentId=${pendingPayment._id}`);
+    formData.append('fail_url', `${config.FRONTEND_URL}/payment/fail?paymentId=${pendingPayment._id}`);
+    formData.append('cancel_url', `${config.FRONTEND_URL}/payment/cancel?paymentId=${pendingPayment._id}`);
     formData.append('amount', payload.amount.toFixed(2));
     formData.append('currency', payload.currency);
     formData.append('cus_name', userEmail);
@@ -40,7 +41,7 @@ const initiateAamarpayPayment = async (userId: string, payload: TInitiatePayment
     formData.append('cus_add1', 'Dhaka');
     formData.append('cus_phone', '01XXXXXXXXX');
     formData.append('desc', `Payment for ${payload.package} package`);
-    formData.append('opt_a', pendingPayment._id.toString());
+    formData.append('opt_a', String(pendingPayment._id));
     formData.append('signature_key', AAMARPAY_SIGNATURE_KEY);
 
     try {
@@ -83,14 +84,14 @@ const handleAamarpayWebhook = async (payload: TPaymentWebhookPayload) => {
         payment.paymentDate = new Date();
 
         const expiryDate = new Date();
-        expiryDate.setMonth(expiryDate.getMonth() + (payment.package === 'premium' ? 12 : 1)); // Example: 1 month default, 12 months for premium
+        expiryDate.setMonth(expiryDate.getMonth() + (payment.package === 'premium' ? 12 : 1));
         payment.expiryDate = expiryDate;
 
         await User.findByIdAndUpdate(payment.user,
             {
                 memberShip: {
-                    takenDate: payment.paymentDate.toISOString(),
-                    exp: payment.expiryDate.toISOString(),
+                    takenDate: payment.paymentDate,
+                    exp: payment.expiryDate,
                     package: { name: payment.package, price: payment.amount }
                 },
                 isVerified: true

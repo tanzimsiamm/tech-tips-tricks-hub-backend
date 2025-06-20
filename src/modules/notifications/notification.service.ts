@@ -13,7 +13,7 @@ const getNotificationsByUserId = async (userId: string, query: any): Promise<INo
     let filter: Record<string, any> = { user: userId };
 
     if (read !== undefined) {
-        filter.read = read === 'true'; // Convert string 'true'/'false' to boolean
+        filter.read = read === 'true';
     }
 
     const notifications = await Notification.find(filter)
@@ -26,7 +26,7 @@ const getNotificationsByUserId = async (userId: string, query: any): Promise<INo
 
 const markNotificationAsRead = async (notificationId: string, userId: string): Promise<INotificationDocument | null> => {
     const notification = await Notification.findOneAndUpdate(
-        { _id: notificationId, user: userId, read: false }, // Only mark if not already read
+        { _id: notificationId, user: userId, read: false },
         { read: true },
         { new: true }
     );

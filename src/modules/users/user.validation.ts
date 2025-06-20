@@ -1,19 +1,26 @@
 import { z } from "zod";
 import { Types } from 'mongoose';
-import { TMembership } from "./user.interface";
+import { TMembership, TUserBase } from "./user.interface";
 
 const objectIdSchema = z.string().refine((val) => Types.ObjectId.isValid(val), {
     message: "Invalid ObjectId format",
 });
 
-const membershipSchema: z.ZodType<TMembership> = z.object({
-  takenDate: z.string().datetime(),
-  exp: z.string().datetime(),
-  package: z.object({
-    name: z.string(),
-    price: z.number(),
-  }),
-});
+// Zod schema for Membership object
+const membershipSchema = z.object({
+    takenDate: z.preprocess((arg) => {
+        if (typeof arg == "string" || arg instanceof Date) return new Date(arg);
+    }, z.date()),
+    exp: z.preprocess((arg) => {
+        if (typeof arg == "string" || arg instanceof Date) return new Date(arg);
+    }, z.date()),
+    package: z.object({ // Correctly defined to match TMembership['package']
+        name: z.string().min(1, 'Package name is required'),
+        price: z.number().positive('Package price must be a positive number'),
+    }),
+}) as z.ZodType<TMembership>;
+
+
 
 const createUserValidationSchema = z.object({
     name : z.string().min(1, 'Name is required'),

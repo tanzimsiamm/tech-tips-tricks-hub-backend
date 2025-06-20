@@ -1,19 +1,19 @@
-import { Request, Response } from 'express';
+import { Request, Response } from 'express'; // Standard Request
 import httpStatus from 'http-status';
 import catchAsync from '../../utils/catchAsync';
 import sendResponse from '../../utils/sendResponse';
 import { postServices } from './post.service';
 import { postValidations } from './post.validation';
 import AppError from '../../errors/AppError';
-import validateRequest from '../../middleware/validateRequest';
-import { AuthenticatedRequest } from '../../middleware/auth';
-import { TAddCommentPayload, TCreatePostPayload, TPostQueryParams, TUpdatePostPayload } from './post.interface';
-import { Types } from 'mongoose'; // For ObjectId validation
+import { TPostQueryParams, TCreatePostPayload, TUpdatePostPayload } from './post.interface';
 
-const createPost = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-    // Validation handled by validateRequest middleware
-    const userId = req.user!._id.toString();
-    const result = await postServices.createPost(userId, req.body as TCreatePostPayload); // Cast req.body
+const createPost = catchAsync(async (req: Request, res: Response) => {
+    // req.user is guaranteed to be TUserProfileResponse here
+    if (!req.user) {
+        throw new AppError(httpStatus.UNAUTHORIZED, 'User not authenticated');
+    }
+    const userId = req.user._id; // Directly access _id, it's already a string from TUserProfileResponse
+    const result = await postServices.createPost(String(userId), req.body as TCreatePostPayload);
 
     sendResponse(res, {
         statusCode: httpStatus.CREATED,
@@ -24,40 +24,60 @@ const createPost = catchAsync(async (req: AuthenticatedRequest, res: Response) =
 });
 
 const getAllPosts = catchAsync(async (req: Request, res: Response) => {
-    // Validate query parameters
-    const { error, value } = postValidations.getPostsQueryParamsSchema.safeParse(req.query);
-    if (error) {
-        throw new AppError(httpStatus.BAD_REQUEST, error.errors.map(e => e.message).join(', '));
+    // This route can be public
+    const parsedQueryParams = postValidations.getPostsQueryParamsSchema.safeParse(req.query);
+
+    if (!parsedQueryParams.success) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            parsedQueryParams.error.errors.map((e) => e.message).join(', '),
+        );
     }
 
-    const result = await postServices.getAllPosts(value as TPostQueryParams);
+    const queryParams: TPostQueryParams = {
+        ...parsedQueryParams.data,
+        // Ensure isPremium matches TPostQueryParams if it's 'true' | 'false' | undefined
+        isPremium:
+            parsedQueryParams.data.isPremium === true
+                ? 'true'
+                : parsedQueryParams.data.isPremium === false
+                  ? 'false'
+                  : undefined,
+    };
+
+    const { posts, total, page, limit } = await postServices.getAllPosts(queryParams);
 
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
         message: 'Posts retrieved successfully!',
-        data: result,
-        // You might add meta for pagination here
+        data: posts,
         meta: {
-            page: value.page || 1,
-            limit: value.limit || 10,
-            total: await Post.countDocuments(value.category ? { category: value.category } : {}), // A more accurate total based on filter
-        }
+            page: page,
+            limit: limit,
+            total: total,
+        },
     });
 });
 
-const getSinglePost = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const userId = req.user?._id?.toString(); // User might not be logged in for public posts
-    const userRole = req.user?.role;
+// All other controllers are protected routes, so Request is appropriate.
+// The `String()` cast is removed as req.user._id is already a string.
 
-    // Validate Post ID
+const getSinglePost = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const userId = req.user?._id; // Still optional here because this route might be public, or the user is not logged in to view *public* premium content.
+    const userRole = req.user?.role; // Access directly, it's string
+
     const { error: idError } = postValidations.objectIdSchema.safeParse(id);
     if (idError) {
-        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map(e => e.message).join(', '));
+        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map((e) => e.message).join(', '));
     }
 
-    const result = await postServices.getSinglePost(id, userId, userRole);
+    const result = await postServices.getSinglePost(
+        id,
+        userId ? String(userId) : undefined,
+        userRole,
+    ); // userId needs to be string | undefined
 
     sendResponse(res, {
         statusCode: httpStatus.OK,
@@ -67,17 +87,18 @@ const getSinglePost = catchAsync(async (req: AuthenticatedRequest, res: Response
     });
 });
 
-const updatePost = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+const updatePost = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params;
-    const userId = req.user!._id.toString(); // User must be logged in
+    if (!req.user) {
+        throw new AppError(httpStatus.UNAUTHORIZED, 'User not authenticated');
+    }
+    const userId = String(req.user._id); // Ensure string
 
-    // Validate Post ID
     const { error: idError } = postValidations.objectIdSchema.safeParse(id);
     if (idError) {
-        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map(e => e.message).join(', '));
+        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map((e) => e.message).join(', '));
     }
 
-    // Validation handled by validateRequest middleware
     const result = await postServices.updatePost(id, userId, req.body as TUpdatePostPayload);
 
     sendResponse(res, {
@@ -88,15 +109,17 @@ const updatePost = catchAsync(async (req: AuthenticatedRequest, res: Response) =
     });
 });
 
-const deletePost = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+const deletePost = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params;
-    const userId = req.user!._id.toString();
-    const userRole = req.user!.role;
+    if (!req.user) {
+        throw new AppError(httpStatus.UNAUTHORIZED, 'User not authenticated');
+    }
+    const userId = String(req.user._id); // Ensure string
+    const userRole = req.user.role; // Already string
 
-    // Validate Post ID
     const { error: idError } = postValidations.objectIdSchema.safeParse(id);
     if (idError) {
-        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map(e => e.message).join(', '));
+        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map((e) => e.message).join(', '));
     }
 
     const result = await postServices.deletePost(id, userId, userRole);
@@ -109,40 +132,47 @@ const deletePost = catchAsync(async (req: AuthenticatedRequest, res: Response) =
     });
 });
 
-const upvotePost = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params; // Post ID
-    const userId = req.user!._id.toString();
+const upvotePost = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!req.user) {
+        throw new AppError(httpStatus.UNAUTHORIZED, 'User not authenticated');
+    }
+    const userId = String(req.user._id); // Ensure string
 
-    // Validate Post ID
     const { error: idError } = postValidations.objectIdSchema.safeParse(id);
     if (idError) {
-        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map(e => e.message).join(', '));
+        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map((e) => e.message).join(', '));
     }
 
     const result = await postServices.upvotePost(id, userId);
-    sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Post upvoted!', data: result });
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Post upvoted!',
+        data: result,
+    });
 });
 
-const downvotePost = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params; // Post ID
-    const userId = req.user!._id.toString();
+const downvotePost = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!req.user) {
+        throw new AppError(httpStatus.UNAUTHORIZED, 'User not authenticated');
+    }
+    const userId = String(req.user._id); // Ensure string
 
-    // Validate Post ID
     const { error: idError } = postValidations.objectIdSchema.safeParse(id);
     if (idError) {
-        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map(e => e.message).join(', '));
+        throw new AppError(httpStatus.BAD_REQUEST, idError.errors.map((e) => e.message).join(', '));
     }
 
     const result = await postServices.downvotePost(id, userId);
-    sendResponse(res, { statusCode: httpStatus.OK, success: true, message: 'Post downvoted!', data: result });
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Post downvoted!',
+        data: result,
+    });
 });
-
-
-// Comment-related controllers: These calls will now go through commentControllers
-// if you prefer to keep comment routes separate in comment.route.ts.
-// If you want them integrated here (e.g. /posts/:id/comments), you can define them here
-// and use commentServices directly.
-// For now, I'll remove direct add/delete comment controllers from here to avoid duplication with comment module.
 
 export const postControllers = {
     createPost,
@@ -152,5 +182,4 @@ export const postControllers = {
     deletePost,
     upvotePost,
     downvotePost,
-    // Add/delete comments are now handled via comments module routes/controllers
 };

@@ -1,11 +1,11 @@
 import { Schema, model, Types } from "mongoose";
-import { IPostDocument, TPost,  } from "./post.interface";
+import { IPostDocument, TPost } from "./post.interface";
 
 const postSchema = new Schema<IPostDocument>({
     user: {
         type: Schema.Types.ObjectId,
         required: true,
-        ref: 'User', // Reference to the User model
+        ref: 'User',
     },
     title: {
         type: String,
@@ -37,9 +37,9 @@ const postSchema = new Schema<IPostDocument>({
         type: Number,
         default: 0,
     },
-    comments: [ // Embedded comments
+    comments: [
         {
-            user: { // User who made the comment
+            user: {
                 type: Schema.Types.ObjectId,
                 ref: 'User',
                 required: true
@@ -48,7 +48,7 @@ const postSchema = new Schema<IPostDocument>({
                 type: String,
                 required: true,
             },
-            createdAt: { // Timestamp for each comment
+            createdAt: {
                 type: Date,
                 default: Date.now,
             },
@@ -58,15 +58,14 @@ const postSchema = new Schema<IPostDocument>({
         type: Number,
         default: 0,
     },
-    images: [{ // URLs of images attached to the post
+    images: [{
         type: String,
     }],
 }, {
-    timestamps: true, // Adds createdAt and updatedAt for the post itself
+    timestamps: true,
 });
 
-// Indexes for better query performance
-postSchema.index({ category: 1 }); // Index for category filtering
-postSchema.index({ title: 'text', content: 'text' }); // Text index for full-text search on title and content
+postSchema.index({ category: 1 });
+postSchema.index({ title: 'text', content: 'text' });
 
 export const Post = model<IPostDocument>('Post', postSchema);

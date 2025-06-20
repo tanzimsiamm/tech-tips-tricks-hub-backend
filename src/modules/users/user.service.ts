@@ -1,145 +1,191 @@
-// services/user.service.ts
-import httpStatus from 'http-status';
+import { TUser, TUserUpdatePayload, TFollowUnfollowPayload, IUserDocument, TUserProfileResponse, TAdminUserUpdatePayload, TUserBase, TMembership } from "./user.interface";
+import { User } from "./user.model";
+import AppError from "../../errors/AppError";
+import httpStatus from "http-status";
 import { Types } from 'mongoose';
 
-import AppError from '../../errors/AppError';
-import {
-  TUserUpdatePayload,
-  TFollowUnfollowPayload,
-  IUserDocument,
-  TUserProfileResponse,
-} from './user.interface';
-import { User } from './user.model';
-
-/* ------------------------------------------------
-   Helpers
-------------------------------------------------- */
-const projection = '-password -__v';
-const toProfile = (doc: unknown) => doc as TUserProfileResponse;
-
-/* ------------------------------------------------
-   Read
-------------------------------------------------- */
- const getAllUsersFromDB = async (
-  role?: string
-): Promise<TUserProfileResponse[]> => {
-  const query = role ? { role } : {};
-  const users = await User.find(query).select(projection).lean();
-  return users.map(toProfile);
+// Helper function to map IUserDocument (or lean result) to TUserProfileResponse
+// This ensures all _id's are strings and nested populated data matches the response type
+const mapToUserProfileResponse = (userDoc: IUserDocument | (TUserBase & { _id: Types.ObjectId; followers?: any[]; following?: any[]; })): TUserProfileResponse => {
+    return {
+        _id: userDoc._id.toString(), // Convert ObjectId to string
+        name: userDoc.name,
+        email: userDoc.email,
+        role: userDoc.role,
+        image: userDoc.image,
+        coverImg: userDoc.coverImg,
+        memberShip: userDoc.memberShip ? {
+            ...userDoc.memberShip,
+            takenDate: userDoc.memberShip.takenDate instanceof Date ? userDoc.memberShip.takenDate : new Date(userDoc.memberShip.takenDate),
+            exp: userDoc.memberShip.exp instanceof Date ? userDoc.memberShip.exp : new Date(userDoc.memberShip.exp),
+        } : null,
+        // Map populated fields to their string _id and other selected properties
+        followers: userDoc.followers?.map((f: any) => ({ _id: f._id.toString(), name: f.name, email: f.email, image: f.image })) || [],
+        following: userDoc.following?.map((f: any) => ({ _id: f._id.toString(), name: f.name, email: f.email, image: f.image })) || [],
+        isBlocked: userDoc.isBlocked,
+        createdAt: userDoc.createdAt,
+        updatedAt: userDoc.updatedAt,
+    };
 };
 
- const getSingleUserFromDB = async (
-  email: string
-): Promise<TUserProfileResponse | null> => {
-  const user = await User.findOne({ email })
-    .populate({ path: 'followers', select: 'name email image' })
-    .populate({ path: 'following', select: 'name email image' })
-    .select(projection)
-    .lean();
-
-  return user ? toProfile(user) : null;
+const getAllUsersFromDB = async (role?: string): Promise<TUserProfileResponse[]> => {
+    let query: Record<string, any> = {};
+    if (role) {
+        query = { role };
+    }
+    const result = await User.find(query).select('-password -__v').lean();
+    return result.map(mapToUserProfileResponse);
 };
 
-/* ------------------------------------------------
-   Update
-------------------------------------------------- */
- const updateUserIntoDB = async (
-  id: string,
-  payload: TUserUpdatePayload
-): Promise<TUserProfileResponse | null> => {
-  const { password, ...other } = payload;
+const getSingleUserFromDB = async (email: string): Promise<TUserProfileResponse | null> => {
+    const result = await User.findOne({ email })
+        .populate({ path: 'followers', select: 'name email image' })
+        .populate({ path: 'following', select: 'name email image' })
+        .select('-password -__v')
+        .lean();
 
-  const user = await User.findById(id).select('+password');
-  if (!user) throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
+    if (!result) return null;
 
-  /* Ensure e‑mail uniqueness */
-  if (other.email && other.email !== user.email) {
-    const duplicate = await User.exists({ email: other.email });
-    if (duplicate)
-      throw new AppError(httpStatus.CONFLICT, 'Email already in use!');
-  }
-
-  /* Assign new fields */
-  Object.assign(user, other);
-
-  /* Handle password via pre‑save hook */
-  if (password) user.password = password;
-
-  await user.save(); // fires validators + hooks
-
-  const { password: _, __v, ...rest } = user.toObject<IUserDocument>();
-  return rest as TUserProfileResponse;
+    return mapToUserProfileResponse(result);
 };
 
-/* ------------------------------------------------
-   Follow / Unfollow (atomic)
-------------------------------------------------- */
- const followUser = async (
-  { userId, targetedUserId }: TFollowUnfollowPayload
-): Promise<TUserProfileResponse | null> => {
-  if (userId === targetedUserId)
-    throw new AppError(httpStatus.BAD_REQUEST, 'Cannot follow yourself!');
+const updateUserIntoDB = async (id: string, payload: TUserUpdatePayload | TAdminUserUpdatePayload): Promise<TUserProfileResponse | null> => {
+    const { password, ...otherUpdateFields } = payload;
 
-  /* Validate both users exist */
-  const [targetExists, actorExists] = await Promise.all([
-    User.exists({ _id: targetedUserId }),
-    User.exists({ _id: userId }),
-  ]);
-  if (!targetExists || !actorExists)
-    throw new AppError(httpStatus.NOT_FOUND, 'User(s) not found!');
+    const user = await User.findById(id).select('+password') as IUserDocument | null;
+    if (!user) {
+        throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
+    }
 
-  /* Add with $addToSet to avoid duplicates */
-  await Promise.all([
-    User.updateOne(
-      { _id: targetedUserId },
-      { $addToSet: { followers: new Types.ObjectId(userId) } }
-    ),
-    User.updateOne(
-      { _id: userId },
-      { $addToSet: { following: new Types.ObjectId(targetedUserId) } }
-    ),
-  ]);
+    if ('email' in otherUpdateFields && otherUpdateFields.email && otherUpdateFields.email !== user.email) {
+        const existingUser = await User.findOne({ email: otherUpdateFields.email });
+        if (existingUser) {
+            throw new AppError(httpStatus.CONFLICT, 'Email already in use!');
+        }
+    }
 
-  const updated = await User.findById(userId).select(projection).lean();
-  return updated ? toProfile(updated) : null;
+    if (password) {
+        user.password = password;
+        await user.save();
+    }
+    
+    const updatedUserDoc = await User.findByIdAndUpdate<IUserDocument>(id, otherUpdateFields, { new: true, runValidators: true })
+        .select('-password -__v')
+        .lean();
+
+    if (!updatedUserDoc) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Failed to update user');
+    }
+
+    return mapToUserProfileResponse(updatedUserDoc);
 };
 
- const unFollowUser = async (
-  { userId, targetedUserId }: TFollowUnfollowPayload
-): Promise<TUserProfileResponse | null> => {
-  /* Validate both users exist */
-  const [targetExists, actorExists] = await Promise.all([
-    User.exists({ _id: targetedUserId }),
-    User.exists({ _id: userId }),
-  ]);
-  if (!targetExists || !actorExists)
-    throw new AppError(httpStatus.NOT_FOUND, 'User(s) not found!');
 
-  await Promise.all([
-    User.updateOne(
-      { _id: targetedUserId },
-      { $pull: { followers: new Types.ObjectId(userId) } }
-    ),
-    User.updateOne(
-      { _id: userId },
-      { $pull: { following: new Types.ObjectId(targetedUserId) } }
-    ),
-  ]);
+const followUser = async (payload: TFollowUnfollowPayload): Promise<TUserProfileResponse | null> => {
+    const { userId, targetedUserId } = payload;
 
-  const updated = await User.findById(userId).select(projection).lean();
-  return updated ? toProfile(updated) : null;
+    if (userId === targetedUserId) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Cannot follow yourself!');
+    }
+
+    const session = await User.startSession();
+    session.startTransaction();
+
+    try {
+        const userToFollow = await User.findById(targetedUserId).session(session) as IUserDocument | null;
+        const followerUser = await User.findById(userId).session(session) as IUserDocument | null;
+
+        if (!userToFollow || !followerUser) {
+            throw new AppError(httpStatus.NOT_FOUND, 'User(s) not found!');
+        }
+
+        if (userToFollow.followers?.some(f => f.equals(followerUser._id))) {
+             throw new AppError(httpStatus.CONFLICT, 'You are already following this user!');
+        }
+
+        userToFollow.followers?.push(followerUser._id);
+        await userToFollow.save({ session });
+
+        followerUser.following?.push(userToFollow._id);
+        await followerUser.save({ session });
+
+        await session.commitTransaction();
+
+        const updatedFollowerUser = await User.findById(userId)
+            .select('-password -__v')
+            .populate({ path: 'followers', select: 'name email image' })
+            .populate({ path: 'following', select: 'name email image' })
+            .lean();
+
+        if (!updatedFollowerUser) return null;
+
+        return mapToUserProfileResponse(updatedFollowerUser);
+
+    } catch (error) {
+        await session.abortTransaction();
+        throw error;
+    } finally {
+        session.endSession();
+    }
 };
 
-/* ------------------------------------------------
-   Delete
-------------------------------------------------- */
- const deleteUserFromDB = async (
-  id: string
-): Promise<IUserDocument | null> => {
-  const user = await User.findByIdAndDelete(id);
-  if (!user) throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
-  return user;
+const unFollowUser = async (payload: TFollowUnfollowPayload): Promise<TUserProfileResponse | null> => {
+    const { userId, targetedUserId } = payload;
+
+    const session = await User.startSession();
+    session.startTransaction();
+
+    try {
+        const userToUnfollow = await User.findById(targetedUserId).session(session) as IUserDocument | null;
+        const unfollowerUser = await User.findById(userId).session(session) as IUserDocument | null;
+
+        if (!userToUnfollow || !unfollowerUser) {
+            throw new AppError(httpStatus.NOT_FOUND, 'User(s) not found!');
+        }
+
+        if (!userToUnfollow.followers?.some(f => f.equals(unfollowerUser._id))) {
+            throw new AppError(httpStatus.CONFLICT, 'You are not following this user!');
+        }
+
+        userToUnfollow.followers = userToUnfollow.followers?.filter(
+            (id: Types.ObjectId) => !id.equals(unfollowerUser._id)
+        );
+        await userToUnfollow.save({ session });
+
+        unfollowerUser.following = unfollowerUser.following?.filter(
+            (id: Types.ObjectId) => !id.equals(userToUnfollow._id)
+        );
+        await unfollowerUser.save({ session });
+
+        await session.commitTransaction();
+
+        const updatedUnfollowerUser = await User.findById(userId)
+            .select('-password -__v')
+            .populate({ path: 'followers', select: 'name email image' })
+            .populate({ path: 'following', select: 'name email image' })
+            .lean();
+
+        if (!updatedUnfollowerUser) return null;
+
+        return mapToUserProfileResponse(updatedUnfollowerUser);
+
+    } catch (error) {
+        await session.abortTransaction();
+        throw error;
+    } finally {
+        session.endSession();
+    }
 };
+
+
+const deleteUserFromDB = async (id: string): Promise<IUserDocument | null> => {
+    const user = await User.findByIdAndDelete(id);
+    if (!user) {
+        throw new AppError(httpStatus.NOT_FOUND, 'User not found!');
+    }
+    return user;
+};
+
 
 export const userServices = {
     getAllUsersFromDB,

@@ -1,27 +1,34 @@
 import { z } from 'zod';
-import { TNotificationType, TCreateNotificationPayload } from './notification.interface';
 import { Types } from 'mongoose';
+import { TNotificationType } from './notification.interface';
 
-const objectIdSchema = z.string().refine((val) => Types.ObjectId.isValid(val), {
-    message: "Invalid ObjectId format",
+const objectIdSchema = z.string().transform((val, ctx) => {
+  if (!Types.ObjectId.isValid(val)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Invalid ObjectId format",
+    });
+    return z.NEVER;
+  }
+  return new Types.ObjectId(val);
 });
 
-const notificationTypes: TNotificationType[] = ['new_post', 'comment', 'follow', 'payment_success', 'admin_message'];
+const notificationTypes = ['new_post', 'comment', 'follow', 'payment_success', 'admin_message'] as const;
 
-const createNotificationValidationSchema = z.object({
-    user: objectIdSchema,
-    sender: objectIdSchema.optional(),
-    type: z.enum(notificationTypes),
-    message: z.string().min(1, 'Notification message cannot be empty'),
-    link: z.string().url('Invalid link format').optional(),
+export const createNotificationValidationSchema = z.object({
+  user: objectIdSchema,
+  sender: objectIdSchema.optional(),
+  type: z.enum(notificationTypes),
+  message: z.string().min(1),
+  link: z.string().url().optional(),
 });
 
-// For validation of ID parameters
-const notificationIdParamSchema = z.object({
-    id: objectIdSchema,
+export const notificationIdParamSchema = z.object({
+  id: objectIdSchema,
 });
 
+// Explicitly export all validations
 export const notificationValidations = {
-    createNotificationValidationSchema,
-    notificationIdParamSchema,
+  createNotificationValidationSchema,
+  notificationIdParamSchema,
 };
