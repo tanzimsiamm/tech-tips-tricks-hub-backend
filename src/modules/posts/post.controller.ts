@@ -24,26 +24,9 @@ const createPost = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getAllPosts = catchAsync(async (req: Request, res: Response) => {
-    // This route can be public
-    const parsedQueryParams = postValidations.getPostsQueryParamsSchema.safeParse(req.query);
-
-    if (!parsedQueryParams.success) {
-        throw new AppError(
-            httpStatus.BAD_REQUEST,
-            parsedQueryParams.error.errors.map((e) => e.message).join(', '),
-        );
-    }
-
-    const queryParams: TPostQueryParams = {
-        ...parsedQueryParams.data,
-        // Ensure isPremium matches TPostQueryParams if it's 'true' | 'false' | undefined
-        isPremium:
-            parsedQueryParams.data.isPremium === true
-                ? 'true'
-                : parsedQueryParams.data.isPremium === false
-                  ? 'false'
-                  : undefined,
-    };
+    // FIX APPLIED HERE: Remove manual safeParse check; validateRequest middleware handles it
+    // req.query is now guaranteed to be validated and typed by validateRequest middleware
+    const queryParams: TPostQueryParams = req.query as unknown as TPostQueryParams; // Cast req.query after middleware has parsed it
 
     const { posts, total, page, limit } = await postServices.getAllPosts(queryParams);
 
@@ -56,9 +39,10 @@ const getAllPosts = catchAsync(async (req: Request, res: Response) => {
             page: page,
             limit: limit,
             total: total,
-        },
+        }
     });
 });
+
 
 // All other controllers are protected routes, so Request is appropriate.
 // The `String()` cast is removed as req.user._id is already a string.

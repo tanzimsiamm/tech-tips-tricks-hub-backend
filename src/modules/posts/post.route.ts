@@ -16,9 +16,10 @@ router.post(
 
 router.get(
     '/',
-    validateRequest(postValidations.getPostsQueryParamsSchema),
+    validateRequest(postValidations.getPostsQueryParamsSchema, 'query'),
     postControllers.getAllPosts
 );
+
 
 router.get(
     '/:id',
